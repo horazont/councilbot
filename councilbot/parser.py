@@ -11,6 +11,7 @@ class Action(enum.Enum):
     HELP = "help"
     LIST_POLLS = "list_polls"
     LIST_VOTES = "list_votes"
+    LIST_GENERIC = "list_generic"
     NULL = None
 
 
@@ -48,9 +49,18 @@ class TextNode:
             if match is None:
                 continue
 
+            groups = match.groupdict()
+
             if child.save is not None:
                 params = params.copy()
-                params[child.save] = child.save_const or first_word
+                params[child.save] = (
+                    child.save_const or groups.get("save") or first_word
+                )
+
+            to_push = groups.get("push")
+
+            if to_push:
+                remaining_words.insert(1, to_push)
 
             return child.parse(remaining_words[1:], params)
 
@@ -123,6 +133,12 @@ PARSE_TREE = TextNode(
             ]
         ),
         TextNode(
+            re.compile(r"!(?P<save>[+-][01])(?P<push>:.+)?"),
+            save="vote",
+            skip=_VOTEWORDS_SKIP,
+            action=Action.CAST_VOTE,
+        ),
+        TextNode(
             re.compile(r"vote", re.I),
             children=[
                 TextNode(
@@ -134,12 +150,16 @@ PARSE_TREE = TextNode(
             ]
         ),
         TextNode(
-            re.compile(r"help", re.I),
+            re.compile(r"!?help", re.I),
             action=Action.HELP,
         ),
         TextNode(
             re.compile(r"disregard|nevermind", re.I),
             action=Action.NULL,
+        ),
+        TextNode(
+            re.compile("!list", re.I),
+            action=Action.LIST_GENERIC,
         ),
         TextNode(
             re.compile(r"show|list", re.I),

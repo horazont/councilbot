@@ -35,6 +35,8 @@ def extract_text(body):
 
 def is_addressed_to(text, nickname):
     # format is "<nickname>[,:] "
+    if text.startswith("!"):
+        return True
     if len(text) < len(nickname) + 2:
         return False
     if not text.startswith(nickname):
@@ -56,6 +58,9 @@ def partition_request(nickname, text):
     """
     if not is_addressed_to(text, nickname):
         raise ValueError("not addressed to {}".format(nickname))
+
+    if text.startswith("!"):
+        return text
 
     return text[len(nickname)+2:].strip()
 
@@ -105,6 +110,8 @@ class CouncilBot(aioxmpp.service.Service):
 
             parser.Action.LIST_POLLS: self._action_list_polls,
             parser.Action.AUTO_CONCLUDE_OPEN_POLLS: self._action_autoconclude,
+
+            parser.Action.LIST_GENERIC: self._action_list_generic,
         }
         assert (
             set(self._action_map.keys()) == set(parser.Action),
@@ -514,3 +521,11 @@ class CouncilBot(aioxmpp.service.Service):
             )
 
         return None, None
+
+    def _action_list_generic(self, actor, message_id, remaining_words, params):
+        return self._action_list_polls(
+            actor,
+            message_id,
+            [],
+            {"selector": parser.PollSelector.OPEN},
+        )
