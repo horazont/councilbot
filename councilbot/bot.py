@@ -83,6 +83,10 @@ def log_exceptions(logger, message=None):
     return decorator
 
 
+def mask_nickname(s):
+    return s[:1] + "_" + s[1:]
+
+
 class CouncilBot(aioxmpp.service.Service):
     ORDER_AFTER = [
         aioxmpp.MUCClient,
@@ -303,7 +307,7 @@ class CouncilBot(aioxmpp.service.Service):
 
             result.append(
                 "{} has voted {}{}".format(
-                    member_info["nick"],
+                    mask_nickname(member_info["nick"]),
                     vote_info["value"].value,
                     ": {}".format(vote_info["remark"])
                     if vote_info["remark"] else
