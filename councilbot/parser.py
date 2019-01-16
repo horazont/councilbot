@@ -87,7 +87,7 @@ _POLL_LIST_NODE = TextNode(
 
 PARSE_TREE = TextNode(
     None,
-    skip=["i", "want", "to", "please", "do"],
+    skip=["i", "want", "to", "please", "do", "can", "you"],
     children=[
         TextNode(
             re.compile(r"create|add|start", re.I),
