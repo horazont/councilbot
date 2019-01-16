@@ -112,6 +112,8 @@ class CouncilBot(aioxmpp.service.Service):
             parser.Action.AUTO_CONCLUDE_OPEN_POLLS: self._action_autoconclude,
 
             parser.Action.LIST_GENERIC: self._action_list_generic,
+
+            parser.Action.THANK: self._action_thank,
         }
         assert (
             set(self._action_map.keys()) == set(parser.Action),
@@ -531,3 +533,6 @@ class CouncilBot(aioxmpp.service.Service):
             [],
             {"selector": parser.PollSelector.OPEN},
         )
+
+    def _action_thank(self, actor, message_id, remaining_words, params):
+        return None, "you’re welcome!"

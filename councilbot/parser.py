@@ -12,6 +12,7 @@ class Action(enum.Enum):
     LIST_POLLS = "list_polls"
     LIST_VOTES = "list_votes"
     LIST_GENERIC = "list_generic"
+    THANK = "thank"
     NULL = None
 
 
@@ -156,6 +157,10 @@ PARSE_TREE = TextNode(
         TextNode(
             re.compile(r"disregard|nevermind", re.I),
             action=Action.NULL,
+        ),
+        TextNode(
+            re.compile(r"thanks?", re.I),
+            action=Action.THANK,
         ),
         TextNode(
             re.compile("!list", re.I),
