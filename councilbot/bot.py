@@ -329,7 +329,7 @@ class CouncilBot(aioxmpp.service.Service):
         return None, "as if it never happened"
 
     def _action_help(self, *args, **kwargs):
-        return None, "TBD"
+        return None, "https://github.com/horazont/councilbot/blob/master/docs/patterns.rst"
 
     def _action_create_poll(self, actor, message_id, remaining_words, params):
         try:
