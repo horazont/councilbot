@@ -300,7 +300,7 @@ class CouncilBot(aioxmpp.service.Service):
 
             if vote_info is None:
                 result.append("{} has not voted{}".format(
-                    member_info["nick"],
+                    mask_nickname(member_info["nick"]),
                     yet_suffix
                 ))
                 continue
