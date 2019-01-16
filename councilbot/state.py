@@ -1,4 +1,5 @@
 import base64
+import collections
 import contextlib
 import copy
 import difflib
@@ -11,11 +12,13 @@ import random
 import re
 import shutil
 import tempfile
+import typing
 
 from datetime import datetime, timedelta
 
 import toml
 
+import aioxmpp
 import aioxmpp.callbacks
 
 
@@ -157,6 +160,173 @@ def safe_writer(destpath, mode="wb", extra_paranoia=False):
                 fsync_dir(destpath.parent)
 
 
+class VoteRecord(collections.namedtuple("VoteRecord",
+                                        [
+                                            "timestamp",
+                                            "value",
+                                            "remark",
+                                        ])):
+    def to_dict(self) -> typing.Mapping:
+        return {
+            "timestamp": self.timestamp,
+            "value": self.value.value,
+            "remark": self.remark,
+        }
+
+    @classmethod
+    def from_dict(cls, d: typing.Mapping):
+        return cls(
+            d["timestamp"],
+            VoteValue(d["value"]),
+            d.get("remark"),
+        )
+
+
+class Poll:
+    """
+    Represent a poll.
+
+    .. autoattribute:: id_
+
+    .. attribute:: subject
+
+    .. autoattribute:: start_time
+
+    .. autoattribute:: end_time
+
+    .. autoattribute:: state
+
+    .. autoattribute:: result
+
+    .. automethod:: push_vote
+
+    .. automethod:: pop_vote
+
+    .. automethod:: get_vote_history
+
+    .. automethod:: get_current_votes
+    """
+
+    def __init__(self, id_, start_time, duration, subject, members):
+        super().__init__()
+        self._id = id_
+        self._start_time = start_time
+        self._end_time = self._start_time + duration
+        self._member_data = {
+            member: []
+            for member in members
+        }
+        self.subject = subject
+
+    @property
+    def start_time(self) -> datetime:
+        return self._start_time
+
+    @property
+    def end_time(self) -> datetime:
+        return self._end_time
+
+    @property
+    def result(self) -> PollResult:
+        return PollResult.FAIL
+
+    def get_state(self, at_time: datetime) -> PollState:
+        is_complete = all(bool(votes) for votes in self._member_data.values())
+
+        if at_time >= self._end_time:
+            if is_complete:
+                return PollState.CONCLUDED
+            return PollState.EXPIRED
+
+        if is_complete:
+            return PollState.COMPLETE
+
+        return PollState.OPEN
+
+    def push_vote(self,
+                  member: aioxmpp.JID,
+                  value: VoteValue,
+                  remark: typing.Optional[str],
+                  timestamp: datetime = None):
+        """
+        Push a vote to the members voting history on this poll.
+        """
+        if timestamp is None:
+            timestamp = datetime.utcnow()
+
+        record = VoteRecord(timestamp, value, remark)
+        records = self._member_data[member]
+        records.append(record)
+
+    def pop_vote(self, member: aioxmpp.JID):
+        """
+        Remove the latest vote of the given member from this poll.
+
+        (Used primarily to process last message corrections.)
+        """
+        records = self._member_data[member]
+        if not records:
+            return
+
+        records.pop()
+
+    def get_vote_history(self) -> typing.Mapping[
+            aioxmpp.JID, typing.List[VoteRecord]]:
+        """
+        Get mapping of vote history by member.
+        """
+        return self._member_data
+
+    def get_votes(self,
+                  member: aioxmpp.JID) -> typing.List[VoteRecord]:
+        """
+        Get vote history of member.
+        """
+        return self._member_data[member]
+
+    def get_current_votes(self) -> typing.Mapping[aioxmpp.JID, VoteRecord]:
+        """
+        Get mapping with most recent votes by member.
+        """
+        return {
+            member: votes[-1] if len(votes) > 0 else None
+            for member, votes in self._member_data.items()
+        }
+
+    def dump(self, fout):
+        toml.dump({
+            "id": self._id,
+            "start_time": self._start_time,
+            "end_time": self._end_time,
+            "subject": self.subject,
+            "votes": {
+                str(member): [
+                    vote.to_dict()
+                    for vote in votes
+                ]
+                for member, votes in self._member_data.items()
+            },
+        }, fout)
+
+    @classmethod
+    def load(cls, fin):
+        data = toml.load(fin)
+        result = cls(
+            data["id"],
+            data["start_time"],
+            data["end_time"] - data["start_time"],
+            data["subject"],
+            map(aioxmpp.JID.fromstr, data["votes"].keys()),
+        )
+
+        for member, votes in data["votes"].items():
+            member = aioxmpp.JID.fromstr(member)
+            records = result._member_data[member]
+            records[:] = map(VoteRecord.from_dict, votes)
+
+        return result
+
+
 class State:
     on_poll_concluded = aioxmpp.callbacks.Signal()
 
@@ -168,13 +338,16 @@ class State:
         }
         self._member_state_cache = {}
         self._statedir = pathlib.Path(config["state"]["directory"]).resolve()
-        self._polldir = self._statedir / "polls"
-        self._polldir.mkdir(parents=True, exist_ok=True)
+        self._activedir = self._statedir / "polls" / "active"
+        self._activedir.mkdir(parents=True, exist_ok=True)
+        self._archivedir = self._statedir / "polls" / "archive"
+        self._archivedir.mkdir(parents=True, exist_ok=True)
         self._membersdir = self._statedir / "members"
         self._membersdir.mkdir(parents=True, exist_ok=True)
+        self._agendadir = self._statedir / "agenda"
+        self._agendadir.mkdir(parents=True, exist_ok=True)
 
         self._polls = {}
-        self._concluded_polls = {}
         self.reload_polls()
 
     def _get_rounded_time(self):
