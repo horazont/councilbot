@@ -251,10 +251,18 @@ class Poll:
 
     @property
     def result(self) -> PollResult:
+        # This function implements the last paragraph fo Section 8.1 of the
+        # XSF Bylaws.
+
+        # XSF Bylaws section 8.1
+        #
+        # > The XMPP Council shall act upon the affirmative vote of a majority
+        # > of the members of the Council voting, although the negative vote of
+        # > any one member of the Council shall function as a veto. A quorum of
+        # > the XMPP Council shall be a majority of the members of the Council.
+
         number_of_acks = 0
         number_of_votes = 0
-        has_veto = False
-        quorum = len(self._member_data) / 2
 
         for vote in self.get_current_votes().values():
             if vote is None:
@@ -264,14 +272,31 @@ class Poll:
             if vote.value == VoteValue.ACK:
                 number_of_acks += 1
             elif vote.value == VoteValue.VETO:
+                # Bylaws:
+                # > […] although the negative vote of any one member of the
+                # > Council shall function as a veto.
                 return PollResult.VETO
 
+        # Bylaws:
+        # > A quorum of the XMPP Council shall be a majority of the members of
+        # > the Council.
+
+        # number of council members = len(self._member_data)
+        quorum = len(self._member_data) / 2
+
         if number_of_votes <= quorum:
+            # no quorum -> fail
             return PollResult.FAIL
 
+        # Bylaws:
+        # > The XMPP Council shall act upon the affirmative vote of a majority
+        # > of the members of the Council voting […].
+
+        # number of the members of the Council voting = number_of_votes
         majority = number_of_votes / 2
 
         if number_of_acks <= majority:
+            # no majority -> fail
             return PollResult.FAIL
 
         return PollResult.PASS
