@@ -268,14 +268,15 @@ class Poll:
             if vote is None:
                 continue
 
-            number_of_votes += 1
-            if vote.value == VoteValue.ACK:
-                number_of_acks += 1
-            elif vote.value == VoteValue.VETO:
+            if vote.value == VoteValue.VETO:
                 # Bylaws:
                 # > […] although the negative vote of any one member of the
                 # > Council shall function as a veto.
                 return PollResult.VETO
+
+            number_of_votes += 1
+            if vote.value == VoteValue.ACK:
+                number_of_acks += 1
 
         # Bylaws:
         # > A quorum of the XMPP Council shall be a majority of the members of
