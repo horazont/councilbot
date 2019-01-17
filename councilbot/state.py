@@ -718,7 +718,8 @@ class State:
                     actor,
                     message_id,
                     topic,
-                    lifetime=timedelta(days=14)) -> TransactionID:
+                    lifetime=timedelta(days=14),
+                    tag=None) -> TransactionID:
         # data for reversal: dirname (to mark deleted)
         tid = self.make_transaction_id()
 
@@ -733,10 +734,11 @@ class State:
         poll = Poll(
             id_,
             start_time,
-            timedelta(days=14),
+            lifetime,
             topic,
             self._member_map.keys(),
         )
+        poll.tag = tag
         path = self._activedir / self._poll_filename(id_)
 
         try:
@@ -815,20 +817,44 @@ class State:
         # data for reversal: dirname, old_topic
         tid = self.make_transaction_id()
 
-    def find_poll(self, text) -> str:
-        text = text.casefold()
-        pollmap = [
-            (poll.subject, poll.id_)
-            for poll in self._polls.values()
-        ]
+    def _find_poll_in_listmap(self, text, pollmap, confidence) -> str:
         options = [item[0].casefold() for item in pollmap]
-        match = difflib.get_close_matches(text, options, n=1, cutoff=0.4)
+        match = difflib.get_close_matches(text, options, n=1,
+                                          cutoff=confidence)
         if not match:
             raise KeyError(text)
 
         match, = match
 
         return pollmap[options.index(match)][1]
+
+    def find_poll(self, text) -> str:
+        text = text.casefold()
+
+        pollmap = [
+            (poll.tag, poll.id_)
+            for poll in self._polls.values()
+            if poll.tag is not None
+        ]
+        try:
+            return self._find_poll_in_listmap(
+                text,
+                pollmap,
+                confidence=0.8
+            )
+        except KeyError:
+            pass
+
+        pollmap = [
+            (poll.subject, poll.id_)
+            for poll in self._polls.values()
+        ]
+
+        return self._find_poll_in_listmap(
+            text,
+            pollmap,
+            confidence=0.4
+        )
 
     def get_poll(self, poll_id: str) -> Poll:
         self.expire_polls()

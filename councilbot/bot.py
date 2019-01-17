@@ -1,5 +1,6 @@
 import asyncio
 import functools
+import re
 
 from datetime import datetime, timedelta
 
@@ -13,6 +14,9 @@ import aioxmpp.xso
 import councilbot.state
 
 from . import parser
+
+
+TAG_RE = re.compile(r"\[([^\]]+)\]")
 
 
 class Replace(aioxmpp.xso.XSO):
@@ -347,11 +351,19 @@ class CouncilBot(aioxmpp.service.Service):
     def _action_create_poll(self, actor, message_id, remaining_words, params):
         text = " ".join(remaining_words).rstrip("? \t\n")
 
+        match = TAG_RE.search(text)
+        if match is not None:
+            tag = match.group(1)
+            text = TAG_RE.sub(r"\1", text, 1)
+        else:
+            tag = None
+
         try:
             tid, poll_id = self._state.create_poll(
                 actor,
                 message_id,
                 text,
+                tag=tag,
             )
         except FileExistsError:
             return (
