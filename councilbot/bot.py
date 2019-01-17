@@ -84,7 +84,7 @@ def log_exceptions(logger, message=None):
 
 
 def mask_nickname(s):
-    return s[:1] + "_" + s[1:]
+    return s[:1] + "⋅" + s[1:]
 
 
 class CouncilBot(aioxmpp.service.Service):
