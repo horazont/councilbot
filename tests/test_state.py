@@ -600,3 +600,47 @@ class TestPoll(unittest.TestCase):
             self.p.get_vote_history(),
             p2.get_vote_history()
         )
+
+    def test_poll_is_passing_with_all_acks(self):
+        for member in self.members:
+            self.p.push_vote(member, state.VoteValue.ACK, None)
+
+        self.assertEqual(self.p.result, state.PollResult.PASS)
+
+    def test_poll_is_passing_with_majority_acks(self):
+        for member in self.members[:3]:
+            self.p.push_vote(member, state.VoteValue.ACK, None)
+        for member in self.members[3:]:
+            self.p.push_vote(member, state.VoteValue.MINUS_ZERO, None)
+
+        self.assertEqual(self.p.result, state.PollResult.PASS)
+
+    def test_poll_is_veto_with_single_veto(self):
+        for member in self.members[:4]:
+            self.p.push_vote(member, state.VoteValue.ACK, None)
+        for member in self.members[4:]:
+            self.p.push_vote(member, state.VoteValue.VETO, None)
+
+        self.assertEqual(self.p.result, state.PollResult.VETO)
+
+    def test_poll_is_failing_without_majority_of_votes(self):
+        for member in self.members[:2]:
+            self.p.push_vote(member, state.VoteValue.ACK, None)
+
+        self.assertEqual(self.p.result, state.PollResult.FAIL)
+
+    def test_poll_is_passing_with_majority_of_quorum_acks(self):
+        for member in self.members[:2]:
+            self.p.push_vote(member, state.VoteValue.ACK, None)
+        for member in self.members[2:3]:
+            self.p.push_vote(member, state.VoteValue.MINUS_ZERO, None)
+
+        self.assertEqual(self.p.result, state.PollResult.PASS)
+
+    def test_poll_is_failing_without_majority_of_quorum_acks(self):
+        for member in self.members[:2]:
+            self.p.push_vote(member, state.VoteValue.ACK, None)
+        for member in self.members[2:4]:
+            self.p.push_vote(member, state.VoteValue.MINUS_ZERO, None)
+
+        self.assertEqual(self.p.result, state.PollResult.FAIL)

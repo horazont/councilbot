@@ -251,7 +251,30 @@ class Poll:
 
     @property
     def result(self) -> PollResult:
-        return PollResult.FAIL
+        number_of_acks = 0
+        number_of_votes = 0
+        has_veto = False
+        quorum = len(self._member_data) / 2
+
+        for vote in self.get_current_votes().values():
+            if vote is None:
+                continue
+
+            number_of_votes += 1
+            if vote.value == VoteValue.ACK:
+                number_of_acks += 1
+            elif vote.value == VoteValue.VETO:
+                return PollResult.VETO
+
+        if number_of_votes <= quorum:
+            return PollResult.FAIL
+
+        majority = number_of_votes / 2
+
+        if number_of_acks <= majority:
+            return PollResult.FAIL
+
+        return PollResult.PASS
 
     @property
     def flags(self) -> typing.Set[PollFlag]:
