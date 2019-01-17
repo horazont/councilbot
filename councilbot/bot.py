@@ -308,9 +308,9 @@ class CouncilBot(aioxmpp.service.Service):
             result.append(
                 "{} has voted {}{}".format(
                     mask_nickname(member_info["nick"]),
-                    vote_info["value"].value,
-                    ": {}".format(vote_info["remark"])
-                    if vote_info["remark"] else
+                    vote_info.value.value,
+                    ": {}".format(vote_info.remark)
+                    if vote_info.remark else
                     " without further comment"
                 )
             )
@@ -360,11 +360,11 @@ class CouncilBot(aioxmpp.service.Service):
                 "Please choose a new topic description."
             )
 
-        vote_info, _ = self._state.get_poll_info(poll_id)
+        poll = self._state.get_poll(poll_id)
 
         return tid, "created poll on {}. Expires on {:%Y-%m-%d}".format(
-            vote_info["topic"],
-            vote_info["end_time"],
+            poll.subject,
+            poll.end_time,
         )
 
     def _action_list_votes(self, actor, message_id, remaining_words, params):
@@ -376,22 +376,23 @@ class CouncilBot(aioxmpp.service.Service):
                 "sorry, I do not know which poll you’re referring to"
             )
 
-        metadata, _ = self._state.get_poll_info(poll_id)
-        summary = self._state.get_vote_summary(poll_id)
-        state = self._state.get_poll_state(poll_id)
+        poll = self._state.get_poll(poll_id)
+        votes = poll.get_current_votes()
+        state = poll.get_state(datetime.utcnow())
+        poll_result = poll.result
 
         result = []
         result.append("poll on {} is {}. The poll {} {}{}{}.".format(
-            metadata["topic"],
+            poll.subject,
             state.value,
             "is" if state.is_open else "has",
-            "pass" if summary["result"].has_passed else "fail",
+            "pass" if poll_result.has_passed else "fail",
             "ing" if state.is_open else "ed",
-            " (with veto)" if summary["result"].has_veto else ""
+            " (with veto)" if poll_result.has_veto else ""
         ))
 
         result.extend(self._format_vote_summary(
-            summary["votes"],
+            votes,
             not state.is_open,
         ))
 
@@ -424,7 +425,7 @@ class CouncilBot(aioxmpp.service.Service):
                 "separates the poll topic and your reason)."
             )
 
-        metadata, _ = self._state.get_poll_info(poll_id)
+        poll = self._state.get_poll(poll_id)
 
         try:
             tid = self._state.cast_vote(
@@ -440,7 +441,7 @@ class CouncilBot(aioxmpp.service.Service):
 
         return tid, "I recorded your vote of {} on {}: {}".format(
             value.value,
-            metadata["topic"],
+            poll.subject,
             remark or "(no comment)",
         )
 
@@ -453,7 +454,7 @@ class CouncilBot(aioxmpp.service.Service):
                 "sorry, I do not know which poll you’re referring to"
             )
 
-        metadata, _ = self._state.get_poll_info(poll_id)
+        poll = self._state.get_poll(poll_id)
 
         try:
             tid = self._state.delete_poll(actor, message_id, poll_id)
@@ -465,7 +466,7 @@ class CouncilBot(aioxmpp.service.Service):
                 "sorry, something went wrong while deleting the poll :("
             )
 
-        return tid, "deleted poll on {}".format(metadata["topic"])
+        return tid, "deleted poll on {}".format(poll.subject)
 
     def _action_list_polls(self, actor, message_id, remaining_words, params):
         if remaining_words:
@@ -481,22 +482,22 @@ class CouncilBot(aioxmpp.service.Service):
 
         result = []
 
-        polls = [self._state.get_poll_info(poll_id)
+        polls = [self._state.get_poll(poll_id)
                  for poll_id in self._state.active_polls]
 
-        for metadata, _ in sorted(polls,
-                                  key=lambda x: x[0]["end_time"],
+        for poll in sorted(polls,
+                                  key=lambda x: x.end_time,
                                   reverse=True):
             result.append(
                 "{} (due {}, on {:%Y-%m-%d})".format(
-                    metadata["topic"],
+                    poll.subject,
                     babel.dates.format_timedelta(
-                        (metadata["end_time"] - now),
+                        (poll.end_time - now),
                         locale="en_GB",
                         add_direction=True,
                         granularity="day",
                     ),
-                    metadata["end_time"]
+                    poll.end_time
                 )
             )
 

@@ -80,6 +80,11 @@ class PollState(enum.Enum):
         return self._REASON_MAP.get(self, None)
 
 
+class PollFlag(enum.Enum):
+    # set on a poll when its conclusion has been officially announced
+    CONCLUDED = "concluded"
+
+
 class ConclusionReason(enum.Enum):
     VOTES_CAST = "votes cast"
     EXPIRATION = "expiration"
@@ -198,6 +203,8 @@ class Poll:
 
     .. autoattribute:: result
 
+    .. autoattribute:: flags
+
     .. automethod:: push_vote
 
     .. automethod:: pop_vote
@@ -212,11 +219,27 @@ class Poll:
         self._id = id_
         self._start_time = start_time
         self._end_time = self._start_time + duration
+        self._flags = set()
         self._member_data = {
             member: []
             for member in members
         }
         self.subject = subject
+
+    def __copy__(self):
+        result = type(self)(self._id,
+                            self._start_time,
+                            self._end_time - self._start_time,
+                            self.subject,
+                            [])
+        result._flags.update(self._flags)
+        for member, votes in self._member_data.items():
+            result._member_data[member] = copy.copy(votes)
+        return result
+
+    @property
+    def id_(self) -> str:
+        return self._id
 
     @property
     def start_time(self) -> datetime:
@@ -229,6 +252,10 @@ class Poll:
     @property
     def result(self) -> PollResult:
         return PollResult.FAIL
+
+    @property
+    def flags(self) -> typing.Set[PollFlag]:
+        return self._flags
 
     def get_state(self, at_time: datetime) -> PollState:
         is_complete = all(bool(votes) for votes in self._member_data.values())
@@ -299,6 +326,7 @@ class Poll:
             "start_time": self._start_time,
             "end_time": self._end_time,
             "subject": self.subject,
+            "flags": list(flag.value for flag in self._flags),
             "votes": {
                 str(member): [
                     vote.to_dict()
@@ -317,6 +345,11 @@ class Poll:
             data["end_time"] - data["start_time"],
             data["subject"],
             map(aioxmpp.JID.fromstr, data["votes"].keys()),
+        )
+
+        result._flags.update(
+            PollFlag(flag)
+            for flag in data["flags"]
         )
 
         for member, votes in data["votes"].items():
@@ -342,6 +375,8 @@ class State:
         self._activedir.mkdir(parents=True, exist_ok=True)
         self._archivedir = self._statedir / "polls" / "archive"
         self._archivedir.mkdir(parents=True, exist_ok=True)
+        self._trashdir = self._statedir / "polls" / "trash"
+        self._trashdir.mkdir(parents=True, exist_ok=True)
         self._membersdir = self._statedir / "members"
         self._membersdir.mkdir(parents=True, exist_ok=True)
         self._agendadir = self._statedir / "agenda"
@@ -355,11 +390,14 @@ class State:
 
     def expire_polls(self):
         cutoff = self._get_rounded_time()
-        for poll_id, (metadata, votes) in list(self._polls.items()):
-            if metadata["end_time"] <= cutoff:
-                self._conclude_poll(poll_id)
+        for poll_id, poll in list(self._polls.items()):
+            state = poll.get_state(cutoff)
+            if state.is_concluded:
+                self._conclude_poll(poll)
 
     def autoconclude_polls(self, cutoff=timedelta(hours=-1)):
+        raise NotImplementedError
+
         # the last vote must have been cast before the cutoff, to give everyone
         # a chance to correct
         cutoff = datetime.utcnow() - cutoff
@@ -394,41 +432,66 @@ class State:
 
         return any_concluded
 
+    def _poll_filename(self, id_):
+        return "{}.toml".format(id_)
+
+    def _archive_poll(self, id_):
+        logger.debug("archiving poll: %s", id_)
+        filename = self._poll_filename(id_)
+        (self._activedir / filename).rename(self._archivedir / filename)
+        self._polls.pop(id_, None)
+
+    def _trash_poll(self, id_):
+        logger.debug("trashing poll: %s", id_)
+        filename = self._poll_filename(id_)
+        (self._activedir / filename).rename(self._trashdir / filename)
+        self._polls.pop(id_, None)
+
+    def _unarchive_poll(self, id_):
+        logger.debug("recovering poll from archive: %s", id_)
+        filename = self._poll_filename(id_)
+        active_path = self._activedir / filename
+        (self._archivedir / filename).rename(active_path)
+        with active_path.open("r") as f:
+            self._polls[id_] = Poll.load(f)
+
+    def _untrash_poll(self, id_):
+        logger.debug("restoring poll from trash: %s", id_)
+        filename = self._poll_filename(id_)
+        active_path = self._activedir / filename
+        (self._trashdir / filename).rename(active_path)
+        with active_path.open("r") as f:
+            self._polls[id_] = Poll.load(f)
+
+    def _delete_poll(self, id_):
+        logger.debug("deleting poll: %s", id_)
+        filename = self._poll_filename(id_)
+        (self._trashdir / filename).unlink()
+
     def reload_polls(self):
-        cutoff = self._get_rounded_time().replace(hour=0) - timedelta(days=14)
+        logger.debug("reload_polls: reloading all polls")
         self._polls.clear()
-        for item in self._polldir.iterdir():
-            if (item / DELETED_FLAG_FILE).exists():
-                # poll deleted, skip
+        to_archive = []
+        for item in self._activedir.iterdir():
+            with item.open("r") as f:
+                data = Poll.load(f)
+
+            if PollState.CONCLUDED in data.flags:
+                logger.debug(
+                    "reload_polls: poll %s is concluded, "
+                    "will move to archive later",
+                    data.id_,
+                )
+                # move it to archive in second pass
+                to_archive.append(data.id_)
                 continue
 
-            is_concluded = (item / CONCLUDED_FLAG_FILE).exists()
-            poll_data = self._load_poll(item)
-            if is_concluded:
-                if poll_data[0]["end_time"] < cutoff:
-                    # do not load polls which are older than 14d in memory
-                    continue
+            self._polls[data.id_] = data
+            logger.debug("reload_polls: loaded poll %s", data.id_)
 
-                self._concluded_polls[item.name] = poll_data
-            else:
-                self._polls[item.name] = poll_data
-
-    def _member_vote_file(self, actor):
-        return "vote-{}.toml".format(self._member_map[actor]["nick"])
-
-    def _load_poll(self, path):
-        with (path / METADATA_FILE).open("r") as f:
-            metadata = toml.load(f)
-
-        member_votes = {}
-        for actor in self._member_map.keys():
-            try:
-                with (path / self._member_vote_file(actor)).open("r") as f:
-                    member_votes[actor] = toml.load(f)
-            except FileNotFoundError:
-                member_votes[actor] = {"vote": []}
-
-        return metadata, member_votes
+        for id_ in to_archive:
+            logger.debug("reload_polls: archiving concluded poll: %s", id_)
+            self._archive_poll(id_)
 
     def make_transaction_id(self):
         return "t{}".format(
@@ -468,6 +531,25 @@ class State:
             toml.dump(new_state, fout)
 
         self._member_state_cache[actor] = new_state
+
+    def _commit_poll_changes(self, new_obj: Poll):
+        with safe_writer(
+                self._activedir / self._poll_filename(new_obj.id_),
+                "w") as f:
+            new_obj.dump(f)
+
+        self._polls[new_obj.id_] = new_obj
+
+    @contextlib.contextmanager
+    def _edit_poll(self, poll: typing.Union[Poll, str]) -> Poll:
+        if isinstance(poll, Poll):
+            poll = copy.copy(poll)
+        else:
+            poll = self._open_poll_for_writing(poll)
+
+        yield poll
+        # on exception, changes are discarded
+        self._commit_poll_changes(poll)
 
     def _rewrite_member_last_message(self, actor,
                                      message_id,
@@ -509,57 +591,34 @@ class State:
         self._rewrite_member_last_message(actor, message_id, transaction)
 
     def _confirm_transaction(self, transaction):
-        # TODO: delete the tree of a poll when the deletion is confirmed
         logger.debug("confirming transaction %r", transaction)
         if transaction["action"] == "delete":
-            path = self._polldir / transaction["revert_data"]["dirname"]
-            shutil.rmtree(str(path))
+            self._delete_poll(transaction["revert_data"]["id"])
 
-    def _mark_poll_deleted(self, poll_id):
-        with (self._polldir / poll_id / DELETED_FLAG_FILE).open("x"):
-            pass
-
-    def _mark_poll_concluded(self, poll_id):
-        with (self._polldir / poll_id / CONCLUDED_FLAG_FILE).open("x"):
-            pass
-
-    def _undelete_poll(self, poll_id):
-        (self._polldir / poll_id / DELETED_FLAG_FILE).unlink()
-
-    def _unconclude_poll(self, poll_id):
-        (self._polldir / poll_id / CONCLUDED_FLAG_FILE).unlink()
+    def _open_poll_for_writing(self, poll_id: str) -> Poll:
+        return copy.copy(self._polls[poll_id])
 
     def _revert_last_cast_vote(self, poll_id, actor):
-        actor_info = self._polls[poll_id][1][actor]
-        new_actor_info = copy.deepcopy(actor_info)
-        new_actor_info["vote"].pop()
-
-        with safe_writer(
-                self._polldir / poll_id / self._member_vote_file(actor),
-                "w") as f:
-            toml.dump(new_actor_info, f)
-
-        actor_info["vote"].pop()
+        with self._edit_poll(poll_id) as poll:
+            poll.pop_vote(actor)
 
     def _revert_transaction(self, actor, transaction):
         logger.debug("reverting transaction %r", transaction)
 
         action = transaction["action"]
         if action == "create":
-            poll_id = transaction["revert_data"]["dirname"]
+            poll_id = transaction["revert_data"]["id"]
             logger.debug("marking %s as deleted and removing from in-memory "
                          "state",
                          poll_id)
-            self._mark_poll_deleted(poll_id)
-            self._polls.pop(poll_id, None)
+            self._trash_poll(poll_id)
         elif action == "delete":
-            poll_id = transaction["revert_data"]["dirname"]
+            poll_id = transaction["revert_data"]["id"]
             logger.debug("marking %s as undeleted and reloading from disk",
                          poll_id)
-            self._undelete_poll(poll_id)
-            self._polls[poll_id] = self._load_poll(self._polldir / poll_id)
+            self._untrash_poll(poll_id)
         elif action == "cast_vote":
-            poll_id = transaction["revert_data"]["dirname"]
+            poll_id = transaction["revert_data"]["id"]
             self._revert_last_cast_vote(poll_id, actor)
         else:
             raise RuntimeError("unknown transaction: {!r}".format(transaction))
@@ -583,45 +642,21 @@ class State:
         self._revert_transaction(actor, transaction)
         return transaction["tid"]
 
-    def _conclude_poll(self, poll_id):
+    def _conclude_poll(self, poll: Poll):
         cutoff = self._get_rounded_time()
-        metadata, votes = self.get_poll_info(poll_id)
-        state = self.get_poll_state(poll_id)
-        if state == PollState.OPEN and metadata["end_time"] > cutoff:
+        state = poll.get_state(cutoff)
+        if state == PollState.OPEN:
             raise ValueError(
                 "cannot conclude poll with open votes before expiration"
             )
 
-        new_metadata = copy.deepcopy(metadata)
-        if state.is_complete:
-            result_state = PollState.CONCLUDED
-        elif metadata["end_time"] <= cutoff:
-            result_state = PollState.EXPIRED
-        else:
-            raise ValueError("poll cannot be concluded at this time")
+        with self._edit_poll(poll) as poll:
+            poll.flags.add(PollFlag.CONCLUDED)
 
-        new_metadata["state"] = result_state.value
-
-        try:
-            self._mark_poll_concluded(poll_id)
-
-            with safe_writer(self._polldir / poll_id / METADATA_FILE, "w") as f:
-                toml.dump(new_metadata, f)
-        except:  # NOQA
-            try:
-                self._unconclude_poll(poll_id)
-            except FileNotFoundError:
-                pass
-
-            with safe_writer(self._polldir / poll_id / METADATA_FILE,
-                             "w") as f:
-                toml.dump(metadata, f)
-
-            raise
-
-        metadata["state"] = new_metadata["state"]
-        self._concluded_polls[poll_id] = self._polls.pop(poll_id)
-        self.on_poll_concluded(poll_id, result_state.conclusion_reason)
+            self.on_poll_concluded(
+                poll.id_,
+                state.conclusion_reason,
+            )
 
     def create_poll(self,
                     actor,
@@ -633,93 +668,69 @@ class State:
 
         start_time = self._get_rounded_time() + timedelta(hours=1)
 
-        dirname = "{:%Y-%m-%d}-{}-{}".format(
+        id_ = "{:%Y-%m-%d}-{}-{}".format(
             start_time,
             tid,
             slugify(topic)[:50]
         )
 
-        metadata = {
-            "start_time": start_time,
-            "end_time": start_time + lifetime,
-            "dirname": dirname,
-            "topic": topic,
-            "actor": str(actor),
-        }
+        poll = Poll(
+            id_,
+            start_time,
+            timedelta(days=14),
+            topic,
+            self._member_map.keys(),
+        )
+        path = self._activedir / self._poll_filename(id_)
 
         try:
-            path = self._polldir / dirname
-            path.mkdir()
-
-            with (path / METADATA_FILE).open("w") as f:
-                toml.dump(metadata, f)
+            with path.open("x") as f:
+                poll.dump(f)
 
             self.write_last_transaction(
                 actor,
                 message_id,
                 tid,
                 action="create",
-                revert_data={"dirname": dirname},
+                revert_data={"id": id_},
             )
         except:  # NOQA
             try:
-                (path / METADATA_FILE).unlink()
-            except FileNotFoundError:
-                pass
-
-            try:
-                path.rmdir()
+                path.unlink()
             except FileNotFoundError:
                 pass
 
             raise
 
-        self._polls[dirname] = (
-            metadata,
-            {},
-        )
+        self._polls[id_] = poll
 
-        return tid, dirname
+        return tid, id_
 
     def cast_vote(self,
-                  actor,
+                  actor: aioxmpp.JID,
                   message_id,
-                  poll_id,
-                  value,
-                  remark) -> TransactionID:
+                  poll_id: str,
+                  value: VoteValue,
+                  remark: typing.Optional[str]) -> TransactionID:
         self.expire_polls()
 
         # data for reversal: dirname
         tid = self.make_transaction_id()
 
-        new_vote = {
-            "value": value.value,
-            "remark": remark,
-            "timestamp": datetime.utcnow(),
-        }
+        with self._edit_poll(poll_id) as poll:
+            poll.push_vote(
+                actor,
+                value,
+                remark,
+            )
 
-        try:
-            actor_info = self._polls[poll_id][1][actor]
-        except KeyError:
-            actor_info = self._polls[poll_id][1][actor] = {"vote": []}
-
-        new_actor_info = copy.deepcopy(actor_info)
-        new_actor_info["vote"].append(new_vote)
-
-        with safe_writer(
-                self._polldir / poll_id / self._member_vote_file(actor),
-                "w") as f:
-            toml.dump(new_actor_info, f)
-
-        self.write_last_transaction(
-            actor,
-            message_id,
-            tid,
-            "cast_vote",
-            revert_data={"dirname": poll_id},
-        )
-
-        actor_info["vote"].append(new_vote)
+            self.write_last_transaction(
+                actor,
+                message_id,
+                tid,
+                "cast_vote",
+                revert_data={"id": poll_id},
+            )
 
         return tid
 
@@ -728,17 +739,15 @@ class State:
         # only when the deletion transaction becomes irreversible
         tid = self.make_transaction_id()
 
-        self._mark_poll_deleted(poll_id)
+        self._trash_poll(poll_id)
 
         self.write_last_transaction(
             actor,
             message_id,
             tid,
             action="delete",
-            revert_data={"dirname": poll_id},
+            revert_data={"id": poll_id},
         )
-
-        self._polls.pop(poll_id, None)
 
         return tid
 
@@ -753,8 +762,8 @@ class State:
     def find_poll(self, text) -> str:
         text = text.casefold()
         pollmap = [
-            (metadata["topic"], metadata["dirname"])
-            for metadata, _ in self._polls.values()
+            (poll.subject, poll.id_)
+            for poll in self._polls.values()
         ]
         options = [item[0].casefold() for item in pollmap]
         match = difflib.get_close_matches(text, options, n=1, cutoff=0.4)
@@ -765,84 +774,9 @@ class State:
 
         return pollmap[options.index(match)][1]
 
-    def get_poll_info(self, poll_id):
+    def get_poll(self, poll_id: str) -> Poll:
         self.expire_polls()
-        try:
-            return self._polls[poll_id]
-        except KeyError:
-            return self._concluded_polls[poll_id]
-
-    def get_poll_state(self, poll_id):
-        self.expire_polls()
-
-        now = self._get_rounded_time()
-        nmembers = len(self._member_map)
-        metadata, votes = self.get_poll_info(poll_id)
-
-        try:
-            written_state = PollState(metadata["state"])
-        except KeyError:
-            pass
-        else:
-            return written_state
-
-        is_complete = (
-            len(votes) == nmembers and
-            sum(bool(member_info.get("vote", []))
-                for member_info in votes.values()) == nmembers
-        )
-        is_expired = now >= metadata["end_time"]
-
-        if is_complete and is_expired:
-            return PollState.CONCLUDED
-        elif is_complete:
-            return PollState.COMPLETE
-        elif is_expired:
-            return PollState.EXPIRED
-        else:
-            return PollState.OPEN
-
-    def get_vote_summary(self, poll_id):
-        _, votes = self.get_poll_info(poll_id)
-
-        has_veto = False
-        number_of_votes = 0
-        number_of_acks = 0
-        number_of_members = len(self._member_map)
-        quorum = math.ceil(number_of_members / 2)
-
-        member_vote_map = {}
-
-        for actor in self._member_map:
-            vote_info = (votes.get(actor, {}).get("vote") or [None])[-1]
-            if vote_info is None:
-                member_vote_map[actor] = None
-                continue
-
-            value = VoteValue(vote_info["value"])
-            number_of_votes += 1
-            if value == VoteValue.VETO:
-                has_veto = True
-            elif value == VoteValue.ACK:
-                number_of_acks += 1
-
-            member_vote_map[actor] = {
-                "value": value,
-                "remark": vote_info["remark"] or None
-            }
-
-        if has_veto:
-            result = PollResult.VETO
-        elif number_of_acks >= quorum:
-            result = PollResult.PASS
-        else:
-            result = PollResult.FAIL
-
-        return {
-            "result": result,
-            "complete": number_of_votes == number_of_members,
-            "votes": member_vote_map,
-        }
+        return self._polls[poll_id]
 
     @property
     def active_polls(self):

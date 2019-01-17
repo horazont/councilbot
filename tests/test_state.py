@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import io
 import itertools
 import unittest
@@ -75,9 +76,11 @@ class TestPoll(unittest.TestCase):
         )
 
     def test_attributes(self):
+        self.assertEqual(self.p.id_, self.id_)
         self.assertEqual(self.p.start_time, self.start)
         self.assertEqual(self.p.end_time, self.start + timedelta(days=14))
         self.assertEqual(self.p.result, state.PollResult.FAIL)
+        self.assertSetEqual(self.p.flags, set())
 
     def test_get_state_returns_open_while_no_votes_and_before_end_time(self):
         for d in range(14):
@@ -441,6 +444,7 @@ class TestPoll(unittest.TestCase):
                 "start_time": self.start,
                 "end_time": self.start + timedelta(days=14),
                 "subject": self.subject,
+                "flags": [],
                 "votes": {
                     str(self.members[0]): [],
                     str(self.members[1]): [],
@@ -471,6 +475,7 @@ class TestPoll(unittest.TestCase):
                 "start_time": self.start,
                 "end_time": self.start + timedelta(days=14),
                 "subject": self.subject,
+                "flags": [],
                 "votes": {
                     str(self.members[0]): [
                         {
@@ -526,14 +531,71 @@ class TestPoll(unittest.TestCase):
     def test_load_restores_from_dump(self):
         buf = io.StringIO()
         self._make_dummy_votes(self.p)
+        self.p.flags.add(state.PollFlag.CONCLUDED)
         self.p.dump(buf)
         buf.seek(0, io.SEEK_SET)
         p2 = state.Poll.load(buf)
 
+        self.assertEqual(self.p.id_, p2.id_)
         self.assertEqual(self.p.start_time, p2.start_time)
         self.assertEqual(self.p.end_time, p2.end_time)
         self.assertEqual(self.p.result, p2.result)
         self.assertEqual(self.p.subject, p2.subject)
+        self.assertSetEqual(self.p.flags, p2.flags)
+        self.assertDictEqual(
+            self.p.get_vote_history(),
+            p2.get_vote_history()
+        )
+
+    def test_flags_can_be_modified(self):
+        self.p.flags.add(state.PollFlag.CONCLUDED)
+        self.assertSetEqual(
+            self.p.flags,
+            {state.PollFlag.CONCLUDED}
+        )
+
+    def test_copy_has_independent_member_data_1(self):
+        p2 = copy.copy(self.p)
+        self.p.push_vote(self.members[0],
+                         unittest.mock.sentinel.value,
+                         unittest.mock.sentinel.remark)
+        p2.push_vote(self.members[1],
+                     unittest.mock.sentinel.value,
+                     unittest.mock.sentinel.remark)
+
+        self.assertNotEqual(self.p.get_vote_history(),
+                            p2.get_vote_history())
+
+    def test_copy_has_independent_member_data_2(self):
+        self.p.push_vote(self.members[0],
+                         unittest.mock.sentinel.value,
+                         unittest.mock.sentinel.remark)
+        p2 = copy.copy(self.p)
+        p2.push_vote(self.members[0],
+                     unittest.mock.sentinel.value,
+                     unittest.mock.sentinel.remark)
+
+        self.assertNotEqual(self.p.get_vote_history(),
+                            p2.get_vote_history())
+
+    def test_copy_has_independent_flags(self):
+        self.p.flags.add(state.PollFlag.CONCLUDED)
+        p2 = copy.copy(self.p)
+        p2.flags.clear()
+
+        self.assertNotEqual(self.p.flags, p2.flags)
+
+    def test_copy_produces_copy(self):
+        self._make_dummy_votes(self.p)
+        self.p.flags.add(state.PollFlag.CONCLUDED)
+        p2 = copy.copy(self.p)
+
+        self.assertEqual(self.p.id_, p2.id_)
+        self.assertEqual(self.p.start_time, p2.start_time)
+        self.assertEqual(self.p.end_time, p2.end_time)
+        self.assertEqual(self.p.result, p2.result)
+        self.assertEqual(self.p.subject, p2.subject)
+        self.assertSetEqual(self.p.flags, p2.flags)
         self.assertDictEqual(
             self.p.get_vote_history(),
             p2.get_vote_history()
