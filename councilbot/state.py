@@ -205,6 +205,8 @@ class Poll:
 
     .. autoattribute:: flags
 
+    .. attribute:: tag
+
     .. automethod:: push_vote
 
     .. automethod:: pop_vote
@@ -225,6 +227,7 @@ class Poll:
             for member in members
         }
         self.subject = subject
+        self.tag = None
 
     def __copy__(self):
         result = type(self)(self._id,
@@ -235,6 +238,7 @@ class Poll:
         result._flags.update(self._flags)
         for member, votes in self._member_data.items():
             result._member_data[member] = copy.copy(votes)
+        result.tag = self.tag
         return result
 
     @property
@@ -376,6 +380,7 @@ class Poll:
             "end_time": self._end_time,
             "subject": self.subject,
             "flags": list(flag.value for flag in self._flags),
+            "tag": self.tag,
             "votes": {
                 str(member): [
                     vote.to_dict()
@@ -405,6 +410,8 @@ class Poll:
             member = aioxmpp.JID.fromstr(member)
             records = result._member_data[member]
             records[:] = map(VoteRecord.from_dict, votes)
+
+        result.tag = data.get("tag")
 
         return result
 

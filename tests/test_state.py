@@ -81,6 +81,7 @@ class TestPoll(unittest.TestCase):
         self.assertEqual(self.p.end_time, self.start + timedelta(days=14))
         self.assertEqual(self.p.result, state.PollResult.FAIL)
         self.assertSetEqual(self.p.flags, set())
+        self.assertEqual(self.p.tag, None)
 
     def test_get_state_returns_open_while_no_votes_and_before_end_time(self):
         for d in range(14):
@@ -445,6 +446,40 @@ class TestPoll(unittest.TestCase):
                 "end_time": self.start + timedelta(days=14),
                 "subject": self.subject,
                 "flags": [],
+                "tag": None,
+                "votes": {
+                    str(self.members[0]): [],
+                    str(self.members[1]): [],
+                    str(self.members[2]): [],
+                    str(self.members[3]): [],
+                    str(self.members[4]): [],
+                }
+            }
+        )
+
+    def test_dump_serialises_metadata(self):
+        self.p.tag = "foo"
+        self.p.flags.add(state.PollFlag.CONCLUDED)
+
+        with contextlib.ExitStack() as stack:
+            dump = stack.enter_context(unittest.mock.patch("toml.dump"))
+
+            self.p.dump(unittest.mock.sentinel.f)
+
+        dump.assert_called_once_with(unittest.mock.ANY,
+                                     unittest.mock.sentinel.f)
+
+        _, (data, _), _ = dump.mock_calls[-1]
+
+        self.assertDictEqual(
+            data,
+            {
+                "id": self.id_,
+                "start_time": self.start,
+                "end_time": self.start + timedelta(days=14),
+                "subject": self.subject,
+                "flags": ["concluded"],
+                "tag": "foo",
                 "votes": {
                     str(self.members[0]): [],
                     str(self.members[1]): [],
@@ -476,6 +511,7 @@ class TestPoll(unittest.TestCase):
                 "end_time": self.start + timedelta(days=14),
                 "subject": self.subject,
                 "flags": [],
+                "tag": None,
                 "votes": {
                     str(self.members[0]): [
                         {
@@ -532,6 +568,7 @@ class TestPoll(unittest.TestCase):
         buf = io.StringIO()
         self._make_dummy_votes(self.p)
         self.p.flags.add(state.PollFlag.CONCLUDED)
+        self.p.tag = "fnord"
         self.p.dump(buf)
         buf.seek(0, io.SEEK_SET)
         p2 = state.Poll.load(buf)
@@ -542,6 +579,7 @@ class TestPoll(unittest.TestCase):
         self.assertEqual(self.p.result, p2.result)
         self.assertEqual(self.p.subject, p2.subject)
         self.assertSetEqual(self.p.flags, p2.flags)
+        self.assertEqual(self.p.tag, p2.tag)
         self.assertDictEqual(
             self.p.get_vote_history(),
             p2.get_vote_history()
@@ -588,6 +626,7 @@ class TestPoll(unittest.TestCase):
     def test_copy_produces_copy(self):
         self._make_dummy_votes(self.p)
         self.p.flags.add(state.PollFlag.CONCLUDED)
+        self.p.tag = "foo"
         p2 = copy.copy(self.p)
 
         self.assertEqual(self.p.id_, p2.id_)
@@ -596,6 +635,7 @@ class TestPoll(unittest.TestCase):
         self.assertEqual(self.p.result, p2.result)
         self.assertEqual(self.p.subject, p2.subject)
         self.assertSetEqual(self.p.flags, p2.flags)
+        self.assertEqual(self.p.tag, p2.tag)
         self.assertDictEqual(
             self.p.get_vote_history(),
             p2.get_vote_history()
