@@ -102,6 +102,11 @@ PARSE_TREE = TextNode(
             ]
         ),
         TextNode(
+            re.compile(r"!create", re.I),
+            skip=_VOTEWORDS_SKIP,
+            action=Action.CREATE_POLL
+        ),
+        TextNode(
             re.compile(r"delete|remove|cancel", re.I),
             skip=["the"],
             children=[
@@ -195,6 +200,11 @@ PARSE_TREE = TextNode(
                 ),
                 _POLL_LIST_NODE
             ]
+        ),
+        TextNode(
+            re.compile(r"!show", re.I),
+            skip=_VOTEWORDS_SKIP,
+            action=Action.LIST_VOTES,
         )
     ]
 )
