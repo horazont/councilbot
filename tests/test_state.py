@@ -84,6 +84,7 @@ class TestPoll(unittest.TestCase):
         self.assertEqual(self.p.result, state.PollResult.FAIL)
         self.assertSetEqual(self.p.flags, set())
         self.assertEqual(self.p.tag, None)
+        self.assertSequenceEqual(self.p.urls, [])
 
     def test_get_state_returns_open_while_no_votes_and_before_end_time(self):
         for d in range(14):
@@ -449,6 +450,7 @@ class TestPoll(unittest.TestCase):
                 "subject": self.subject,
                 "flags": [],
                 "tag": None,
+                "urls": [],
                 "votes": {
                     str(self.members[0]): [],
                     str(self.members[1]): [],
@@ -462,6 +464,7 @@ class TestPoll(unittest.TestCase):
     def test_dump_serialises_metadata(self):
         self.p.tag = "foo"
         self.p.flags.add(state.PollFlag.CONCLUDED)
+        self.p.urls.append("https://domain.example/foo")
 
         with contextlib.ExitStack() as stack:
             dump = stack.enter_context(unittest.mock.patch("toml.dump"))
@@ -482,6 +485,9 @@ class TestPoll(unittest.TestCase):
                 "subject": self.subject,
                 "flags": ["concluded"],
                 "tag": "foo",
+                "urls": [
+                    "https://domain.example/foo"
+                ],
                 "votes": {
                     str(self.members[0]): [],
                     str(self.members[1]): [],
@@ -514,6 +520,7 @@ class TestPoll(unittest.TestCase):
                 "subject": self.subject,
                 "flags": [],
                 "tag": None,
+                "urls": [],
                 "votes": {
                     str(self.members[0]): [
                         {
@@ -571,6 +578,7 @@ class TestPoll(unittest.TestCase):
         self._make_dummy_votes(self.p)
         self.p.flags.add(state.PollFlag.CONCLUDED)
         self.p.tag = "fnord"
+        self.p.urls.append("https://domain.example/foo")
         self.p.dump(buf)
         buf.seek(0, io.SEEK_SET)
         p2 = state.Poll.load(buf)
@@ -585,6 +593,10 @@ class TestPoll(unittest.TestCase):
         self.assertDictEqual(
             self.p.get_vote_history(),
             p2.get_vote_history()
+        )
+        self.assertSequenceEqual(
+            self.p.urls,
+            p2.urls,
         )
 
     def test_flags_can_be_modified(self):
@@ -625,10 +637,15 @@ class TestPoll(unittest.TestCase):
 
         self.assertNotEqual(self.p.flags, p2.flags)
 
+    def test_copy_has_independent_urls(self):
+        p2 = copy.copy(self.p)
+        self.assertIsNot(self.p.urls, p2.urls)
+
     def test_copy_produces_copy(self):
         self._make_dummy_votes(self.p)
         self.p.flags.add(state.PollFlag.CONCLUDED)
         self.p.tag = "foo"
+        self.p.urls.append("bar")
         p2 = copy.copy(self.p)
 
         self.assertEqual(self.p.id_, p2.id_)
@@ -638,6 +655,7 @@ class TestPoll(unittest.TestCase):
         self.assertEqual(self.p.subject, p2.subject)
         self.assertSetEqual(self.p.flags, p2.flags)
         self.assertEqual(self.p.tag, p2.tag)
+        self.assertSequenceEqual(self.p.urls, p2.urls)
         self.assertDictEqual(
             self.p.get_vote_history(),
             p2.get_vote_history()
