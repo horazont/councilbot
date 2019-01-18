@@ -7,6 +7,8 @@ import unittest.mock
 
 from datetime import datetime, timedelta
 
+import toml
+
 import aioxmpp
 
 import councilbot.state as state
@@ -684,3 +686,115 @@ class TestPoll(unittest.TestCase):
             self.p.push_vote(member, state.VoteValue.MINUS_ZERO, None)
 
         self.assertEqual(self.p.result, state.PollResult.FAIL)
+
+    def test_can_load_first_stable_format(self):
+        data = {
+            "id": self.id_,
+            "start_time": self.start,
+            "end_time": self.start + timedelta(days=14),
+            "subject": self.subject,
+            "flags": {state.PollFlag.CONCLUDED.value},
+            "tag": "some-tag",
+            "votes": {
+                str(self.members[0]): [
+                    {
+                        "timestamp": self.start + timedelta(days=1),
+                        "value": "-0",
+                        "remark": None,
+                    },
+                    {
+                        "timestamp": self.start + timedelta(days=3),
+                        "value": "+1",
+                        "remark": "makes more sense than I thought",
+                    },
+                ],
+                str(self.members[1]): [
+                    {
+                        "timestamp": self.start + timedelta(days=2),
+                        "value": "+1",
+                        "remark": None,
+                    }
+                ],
+                str(self.members[2]): [
+                    {
+                        "timestamp": self.start + timedelta(days=4),
+                        "value": "-1",
+                        "remark": "duplicates XEP-0001",
+                    }
+                ],
+                str(self.members[3]): [
+                    {
+                        "timestamp": self.start + timedelta(days=5),
+                        "value": "+1",
+                        "remark": None,
+                    },
+                ],
+                str(self.members[4]): [
+                    {
+                        "timestamp": self.start + timedelta(days=6),
+                        "value": "+0",
+                        "remark": None,
+                    },
+                ],
+            }
+        }
+
+        f = io.StringIO()
+        toml.dump(data, f)
+        f.seek(0, io.SEEK_SET)
+
+        p = state.Poll.load(f)
+
+        self.assertEqual(p.id_, self.id_)
+        self.assertEqual(p.start_time, self.start)
+        self.assertEqual(p.end_time, self.start + timedelta(days=14))
+        self.assertEqual(p.subject, self.subject)
+        self.assertSetEqual(p.flags, {state.PollFlag.CONCLUDED})
+        self.assertEqual(p.tag, "some-tag")
+
+        self.maxDiff = None
+        self.assertDictEqual(
+            p.get_vote_history(),
+            {
+                self.members[0]: [
+                    state.VoteRecord(
+                        self.start + timedelta(days=1),
+                        state.VoteValue.MINUS_ZERO,
+                        None,
+                    ),
+                    state.VoteRecord(
+                        self.start + timedelta(days=3),
+                        state.VoteValue.ACK,
+                        "makes more sense than I thought",
+                    ),
+                ],
+                self.members[1]: [
+                    state.VoteRecord(
+                        self.start + timedelta(days=2),
+                        state.VoteValue.ACK,
+                        None,
+                    ),
+                ],
+                self.members[2]: [
+                    state.VoteRecord(
+                        self.start + timedelta(days=4),
+                        state.VoteValue.VETO,
+                        "duplicates XEP-0001"
+                    ),
+                ],
+                self.members[3]: [
+                    state.VoteRecord(
+                        self.start + timedelta(days=5),
+                        state.VoteValue.ACK,
+                        None,
+                    ),
+                ],
+                self.members[4]: [
+                    state.VoteRecord(
+                        self.start + timedelta(days=6),
+                        state.VoteValue.PLUS_ZERO,
+                        None,
+                    ),
+                ],
+            }
+        )
