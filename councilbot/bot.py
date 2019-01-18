@@ -13,7 +13,7 @@ import aioxmpp.xso
 
 import councilbot.state
 
-from . import parser
+from . import parser, extractor
 
 
 TAG_RE = re.compile(r"\[([^\]]+)\]")
@@ -106,6 +106,8 @@ class CouncilBot(aioxmpp.service.Service):
         super().__init__(client, **kwargs)
         self._muc_client = self.dependencies[aioxmpp.MUCClient]
         self._background_task = None
+        self._worker_task = None
+        self._worker_queue = asyncio.Queue()
         self._action_map = {
             parser.Action.NULL: self._action_nothing,
             parser.Action.HELP: self._action_help,
@@ -153,6 +155,11 @@ class CouncilBot(aioxmpp.service.Service):
             await asyncio.sleep(3600)
             self._state.expire_polls()
 
+    async def _worker(self):
+        while True:
+            job, argv = await self._worker_queue.get()
+            await job(*argv)
+
     @aioxmpp.service.depsignal(aioxmpp.Client, "on_stream_established",
                                defer=True)
     async def _stream_established(self):
@@ -175,16 +182,28 @@ class CouncilBot(aioxmpp.service.Service):
             self.on_fatal_error(exc)
 
         self._state.expire_polls()
+        if self._background_task is not None:
+            self._background_task.cancel()
+
         self._background_task = asyncio.ensure_future(
             self._periodic_expire()
         )
         self._background_task.add_done_callback(self._background_task_done)
+
+        if self._worker_task is not None:
+            self._worker_task.cancel()
+        self._worker_task = asyncio.ensure_future(self._worker())
+        self._worker_task .add_done_callback(self._background_task_done)
 
     @aioxmpp.service.depsignal(aioxmpp.Client, "on_stream_destroyed")
     def _stream_kaputt(self):
         if self._background_task is not None:
             self._background_task.cancel()
             self._background_task = None
+
+        if self._worker_task is not None:
+            self._worker_task.cancel()
+            self._worker_task = None
 
     def _send_reply(self, requester, text, *, message_id=None, replace_id=None):
         message = aioxmpp.Message(type_=aioxmpp.MessageType.GROUPCHAT)
@@ -196,6 +215,40 @@ class CouncilBot(aioxmpp.service.Service):
             text = "{}, {}".format(requester.nick, text)
         message.body[self.LANGUAGE] = text
         self._room.send_message(message)
+
+    async def _execute_action(self, impl, member, message_id, remaining_words,
+                              params, replace_id):
+        try:
+            if asyncio.iscoroutinefunction(impl):
+                tid, reply = await impl(
+                    member.direct_jid,
+                    message_id,
+                    remaining_words,
+                    params,
+                )
+            else:
+                tid, reply = impl(
+                    member.direct_jid,
+                    message_id,
+                    remaining_words,
+                    params,
+                )
+
+            if reply is not None:
+                self._send_reply(member, reply,
+                                 message_id=tid,
+                                 replace_id=replace_id)
+            elif replace_id is not None:
+                self._send_reply(None, "nevermind",
+                                 replace_id=replace_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self.logger.error(
+                "failed to process action %s",
+                impl,
+                exc_info=True,
+            )
 
     def _handle_council_room_message(self, message, member, source, **kwargs):
         if self._room.me is member:
@@ -260,20 +313,17 @@ class CouncilBot(aioxmpp.service.Service):
         node, remaining_words, params = info
         action_func = self._action_map[node.action]
 
-        tid, reply = action_func(
-            actor,
-            message.id_,
-            remaining_words,
-            params
-        )
-
-        if reply is not None:
-            self._send_reply(member, reply,
-                             message_id=tid,
-                             replace_id=replace_id)
-        elif replace_id is not None:
-            self._send_reply(None, "nevermind",
-                             replace_id=replace_id)
+        self._worker_queue.put_nowait((
+            self._execute_action,
+            (
+                action_func,
+                member,
+                message.id_,
+                remaining_words,
+                params,
+                replace_id,
+            )
+        ))
 
     def _handle_council_room_join(self, member, **kwargs):
         pass
@@ -348,7 +398,7 @@ class CouncilBot(aioxmpp.service.Service):
     def _action_help(self, *args, **kwargs):
         return None, "https://github.com/horazont/councilbot/blob/master/docs/manual.rst"
 
-    def _action_create_poll(self, actor, message_id, remaining_words, params):
+    async def _action_create_poll(self, actor, message_id, remaining_words, params):
         text = " ".join(remaining_words).rstrip("? \t\n")
 
         match = TAG_RE.search(text)
@@ -358,12 +408,26 @@ class CouncilBot(aioxmpp.service.Service):
         else:
             tag = None
 
+        metadata = await extractor.extract_url_metadata(
+            text,
+        )
+
+        if (metadata is not None and
+                metadata.title and
+                metadata.matched_url == text.strip()):
+            text = metadata.title
+
+        if (metadata is not None and
+                metadata.tag):
+            tag = metadata.tag
+
         try:
             tid, poll_id = self._state.create_poll(
                 actor,
                 message_id,
                 text,
                 tag=tag,
+                urls=metadata.urls if metadata is not None else []
             )
         except FileExistsError:
             return (
@@ -374,10 +438,18 @@ class CouncilBot(aioxmpp.service.Service):
 
         poll = self._state.get_poll(poll_id)
 
-        return tid, "created poll on {}. Expires on {:%Y-%m-%d}".format(
-            poll.subject,
-            poll.end_time,
-        )
+        result = [
+            "created poll on {}".format(poll.subject),
+            "Expires: {:%Y-%m-%d}".format(poll.end_time),
+        ]
+
+        if poll.tag:
+            result.append("Tag: {}".format(poll.tag))
+
+        for url in poll.urls:
+            result.append("URL: {}".format(url))
+
+        return tid, "\n".join(result)
 
     def _action_list_votes(self, actor, message_id, remaining_words, params):
         try:

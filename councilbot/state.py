@@ -682,6 +682,21 @@ class State:
         elif action == "cast_vote":
             poll_id = transaction["revert_data"]["id"]
             self._revert_last_cast_vote(poll_id, actor)
+        elif action == "attach_url":
+            poll_id = transaction["revert_data"]["id"]
+            url = transaction["revert_data"]["url"]
+            with self._edit_poll(poll_id) as poll:
+                try:
+                    poll.urls.remove(url)
+                except ValueError as exc:
+                    # not in urls, maybe edited already, ignore
+                    logger.debug(
+                        "revert attach_url: failed to remove %s from poll "
+                        "%s: %s",
+                        url,
+                        poll_id,
+                        exc,
+                    )
         else:
             raise RuntimeError("unknown transaction: {!r}".format(transaction))
 
@@ -725,7 +740,8 @@ class State:
                     message_id,
                     topic,
                     lifetime=timedelta(days=14),
-                    tag=None) -> TransactionID:
+                    tag=None,
+                    urls=[]) -> TransactionID:
         # data for reversal: dirname (to mark deleted)
         tid = self.make_transaction_id()
 
@@ -744,6 +760,7 @@ class State:
             topic,
             self._member_map.keys(),
         )
+        poll.urls[:] = urls
         poll.tag = tag
         path = self._activedir / self._poll_filename(id_)
 
@@ -794,6 +811,26 @@ class State:
                 tid,
                 "cast_vote",
                 revert_data={"id": poll_id},
+            )
+
+        return tid
+
+    def attach_url(self,
+                   actor: aioxmpp.JID,
+                   message_id,
+                   poll_id: str,
+                   url: str) -> TransactionID:
+        tid = self.make_transaction_id()
+
+        with self._edit_poll(poll_id) as poll:
+            poll.urls.append(url)
+
+            self.write_last_transaction(
+                actor,
+                message_id,
+                tid,
+                "attach_url",
+                revert_data={"id": poll_id, "url": url}
             )
 
         return tid
