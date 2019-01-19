@@ -1,4 +1,5 @@
 import asyncio
+import enum
 import functools
 import re
 
@@ -17,6 +18,44 @@ from . import parser, extractor
 
 
 TAG_RE = re.compile(r"\[([^\]]+)\]")
+
+
+class ActorPermissionLevel(enum.Enum):
+    FLOOR = "floor"
+    COUNCIL = "council"
+
+
+PERMISSION_MAP = {
+    ActorPermissionLevel.FLOOR: (
+        # harmless commands
+        parser.Action.HELP,
+        parser.Action.THANK,
+        parser.Action.NULL,
+
+        # read-only commands
+        parser.Action.LIST_GENERIC,
+        parser.Action.LIST_POLLS,
+        parser.Action.LIST_VOTES,
+    ),
+    ActorPermissionLevel.COUNCIL: (
+        # harmless commands
+        parser.Action.HELP,
+        parser.Action.THANK,
+        parser.Action.NULL,
+
+        # read-only commands
+        parser.Action.LIST_GENERIC,
+        parser.Action.LIST_POLLS,
+        parser.Action.LIST_VOTES,
+
+        # writing commands
+        parser.Action.CREATE_POLL,
+        parser.Action.CONCLUDE_POLL,
+        parser.Action.AUTO_CONCLUDE_OPEN_POLLS,
+        parser.Action.DELETE_POLL,
+        parser.Action.CAST_VOTE,
+    )
+}
 
 
 class Replace(aioxmpp.xso.XSO):
@@ -263,29 +302,30 @@ class CouncilBot(aioxmpp.service.Service):
 
         actor = member.direct_jid
 
-        if not self._state.is_council_member(actor):
-            self.logger.debug(
-                "ignoring message from non-member %s", actor
-            )
-            return
+        permission_level = ActorPermissionLevel.FLOOR
+        if self._state.is_council_member(actor):
+            permission_level = ActorPermissionLevel.COUNCIL
 
-        if message.xep0308_replace is not None:
-            self.logger.debug(
-                "replacement message from member, checking if it matches the "
-                "last action"
-            )
+        self.logger.debug("%s has %s", actor, permission_level)
 
-            replace_id = self._state.revert_last_transaction(
-                actor,
-                message.xep0308_replace.id_,
-            )
-        else:
-            replace_id = None
+        replace_id = None
+        if permission_level != ActorPermissionLevel.FLOOR:
+            # due to memory concerns, LMC is only allowed for council members
+            if message.xep0308_replace is not None:
+                self.logger.debug(
+                    "replacement message from member, checking if it matches "
+                    "the last action"
+                )
 
-        # always note the last message id, to be sure. we have to do this after
-        # possible reversals though, because this command discards transaction
-        # info
-        self._state.write_last_message_id(actor, message.id_)
+                replace_id = self._state.revert_last_transaction(
+                    actor,
+                    message.xep0308_replace.id_,
+                )
+
+            # always note the last message id, to be sure. we have to do this
+            # after possible reversals though, because this command discards
+            # transaction info of any previous message and confirms transactions
+            self._state.write_last_message_id(actor, message.id_)
 
         try:
             request = partition_request(self._room.me.nick, text)
@@ -311,6 +351,28 @@ class CouncilBot(aioxmpp.service.Service):
             return
 
         node, remaining_words, params = info
+
+        action = node.action
+        allowed_actions = PERMISSION_MAP[permission_level]
+
+        self.logger.debug("%s attempts to execute %s (level=%s)",
+                          actor, action, permission_level)
+
+        if action not in allowed_actions:
+            self.logger.debug(
+                "%s (level=%s) is not allowed to execute action %s "
+                "(allowed_actions=%s)",
+                actor, permission_level, action, allowed_actions,
+            )
+            self._send_reply(
+                None,
+                "Sorry, {}, I can’t do that.".format(member.nick),
+            )
+            return
+
+        self.logger.debug("permission check passed (allowed_actions=%s)",
+                          allowed_actions)
+
         action_func = self._action_map[node.action]
 
         self._worker_queue.put_nowait((
