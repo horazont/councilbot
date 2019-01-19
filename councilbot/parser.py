@@ -139,7 +139,7 @@ PARSE_TREE = TextNode(
             ]
         ),
         TextNode(
-            re.compile(r"!(?P<save>[+-][01])(?P<push>:.+)?"),
+            re.compile(r"!(?P<save>[+-][01])(?P<push>:.*)?"),
             save="vote",
             skip=_VOTEWORDS_SKIP,
             action=Action.CAST_VOTE,

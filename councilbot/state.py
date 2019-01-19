@@ -464,6 +464,36 @@ class State:
         self._polls = {}
         self.reload_polls()
 
+    def _get_current_poll(self) -> Poll:
+        """
+        Calculate and return the current poll.
+
+        The current poll is set to the poll which has the most recent
+        :attr:`Poll.made_current_at` timestamp, but only if that timestamp is
+        not more than 30 minutes in the past.
+
+        This is an O(n) operation where n is the number of active polls.
+
+        There may be no current poll.
+        """
+        newest = None
+        newest_timestamp = None
+
+        cutoff = datetime.utcnow() - timedelta(minutes=30)
+
+        for poll in self._polls.values():
+            if poll.made_current_at is None:
+                continue
+
+            if poll.made_current_at < cutoff:
+                continue
+
+            if (newest is None or poll.made_current_at > newest_timestamp):
+                newest = poll
+                newest_timestamp = poll.made_current_at
+
+        return newest
+
     def _get_rounded_time(self):
         return datetime.utcnow().replace(minute=0, second=0, microsecond=0)
 
@@ -781,6 +811,7 @@ class State:
         poll.urls[:] = urls
         poll.tag = tag
         poll.description = description
+        poll.made_current_at = datetime.utcnow()
         path = self._activedir / self._poll_filename(id_)
 
         try:
@@ -936,3 +967,10 @@ class State:
 
     def get_member_info(self, actor):
         return self._member_map[actor]
+
+    @property
+    def current_poll(self) -> typing.Optional[str]:
+        current_poll = self._get_current_poll()
+        if not current_poll:
+            return None
+        return current_poll.id_

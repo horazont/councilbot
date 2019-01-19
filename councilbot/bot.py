@@ -416,7 +416,7 @@ class CouncilBot(aioxmpp.service.Service):
 
         if metadata is not None:
             if (metadata.title and
-                metadata.matched_url == text.strip()):
+                    metadata.matched_url == text.strip()):
                 text = metadata.title
 
             if metadata.tag:
@@ -501,13 +501,24 @@ class CouncilBot(aioxmpp.service.Service):
         poll_identifier = poll_identifier.strip()
         remark = remark.strip()
 
-        try:
-            poll_id = self._state.find_poll(poll_identifier)
-        except KeyError:
-            return (
-                None,
-                "sorry, I do not know which vote you mean."
-            )
+        if not poll_identifier:
+            poll_id = self._state.current_poll
+
+            if poll_id is None:
+                return (
+                    None,
+                    "I am uncertain which poll you are referring to, because "
+                    "there is no recent poll and you did not give me any text "
+                    "to go by."
+                )
+        else:
+            try:
+                poll_id = self._state.find_poll(poll_identifier)
+            except KeyError:
+                return (
+                    None,
+                    "sorry, I do not know which poll you mean."
+                )
 
         if value == councilbot.state.VoteValue.VETO and len(remark) < 10:
             return (
