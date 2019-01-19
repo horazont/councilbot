@@ -205,9 +205,11 @@ class Poll:
 
     .. autoattribute:: flags
 
-    .. autoattribute:: urls
+    .. attribute:: urls
 
     .. attribute:: tag
+
+    .. attribute:: description
 
     .. automethod:: push_vote
 
@@ -231,6 +233,7 @@ class Poll:
         self.subject = subject
         self.tag = None
         self.urls = []
+        self.description = None
 
     def __copy__(self):
         result = type(self)(self._id,
@@ -243,6 +246,7 @@ class Poll:
             result._member_data[member] = copy.copy(votes)
         result.tag = self.tag
         result.urls[:] = self.urls
+        result.description = self.description
         return result
 
     @property
@@ -378,7 +382,7 @@ class Poll:
         }
 
     def dump(self, fout):
-        toml.dump({
+        data = {
             "id": self._id,
             "start_time": self._start_time,
             "end_time": self._end_time,
@@ -393,7 +397,11 @@ class Poll:
                 ]
                 for member, votes in self._member_data.items()
             },
-        }, fout)
+        }
+        if self.description is not None:
+            data["description"] = self.description
+
+        toml.dump(data, fout)
 
     @classmethod
     def load(cls, fin):
@@ -418,6 +426,7 @@ class Poll:
 
         result.tag = data.get("tag")
         result.urls[:] = data.get("urls", [])
+        result.description = data.get("description")
 
         return result
 

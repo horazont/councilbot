@@ -85,6 +85,7 @@ class TestPoll(unittest.TestCase):
         self.assertSetEqual(self.p.flags, set())
         self.assertEqual(self.p.tag, None)
         self.assertSequenceEqual(self.p.urls, [])
+        self.assertIsNone(self.p.description)
 
     def test_get_state_returns_open_while_no_votes_and_before_end_time(self):
         for d in range(14):
@@ -465,6 +466,7 @@ class TestPoll(unittest.TestCase):
         self.p.tag = "foo"
         self.p.flags.add(state.PollFlag.CONCLUDED)
         self.p.urls.append("https://domain.example/foo")
+        self.p.description = "transfnordistan express"
 
         with contextlib.ExitStack() as stack:
             dump = stack.enter_context(unittest.mock.patch("toml.dump"))
@@ -485,6 +487,7 @@ class TestPoll(unittest.TestCase):
                 "subject": self.subject,
                 "flags": ["concluded"],
                 "tag": "foo",
+                "description": "transfnordistan express",
                 "urls": [
                     "https://domain.example/foo"
                 ],
@@ -579,6 +582,7 @@ class TestPoll(unittest.TestCase):
         self.p.flags.add(state.PollFlag.CONCLUDED)
         self.p.tag = "fnord"
         self.p.urls.append("https://domain.example/foo")
+        self.p.description = "foobar"
         self.p.dump(buf)
         buf.seek(0, io.SEEK_SET)
         p2 = state.Poll.load(buf)
@@ -598,6 +602,7 @@ class TestPoll(unittest.TestCase):
             self.p.urls,
             p2.urls,
         )
+        self.assertEqual(self.p.description, p2.description)
 
     def test_flags_can_be_modified(self):
         self.p.flags.add(state.PollFlag.CONCLUDED)
@@ -646,6 +651,7 @@ class TestPoll(unittest.TestCase):
         self.p.flags.add(state.PollFlag.CONCLUDED)
         self.p.tag = "foo"
         self.p.urls.append("bar")
+        self.p.description = "fnord"
         p2 = copy.copy(self.p)
 
         self.assertEqual(self.p.id_, p2.id_)
@@ -660,6 +666,7 @@ class TestPoll(unittest.TestCase):
             self.p.get_vote_history(),
             p2.get_vote_history()
         )
+        self.assertEqual(self.p.description, p2.description)
 
     def test_poll_is_passing_with_all_acks(self):
         for member in self.members:
@@ -769,6 +776,7 @@ class TestPoll(unittest.TestCase):
         self.assertEqual(p.subject, self.subject)
         self.assertSetEqual(p.flags, {state.PollFlag.CONCLUDED})
         self.assertEqual(p.tag, "some-tag")
+        self.assertIsNone(p.description)
 
         self.maxDiff = None
         self.assertDictEqual(
