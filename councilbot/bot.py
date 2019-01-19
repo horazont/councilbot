@@ -35,6 +35,7 @@ PERMISSION_MAP = {
         parser.Action.HELP,
         parser.Action.THANK,
         parser.Action.NULL,
+        parser.Action.INTRODUCE,
 
         # read-only commands
         parser.Action.LIST_GENERIC,
@@ -46,6 +47,7 @@ PERMISSION_MAP = {
         parser.Action.HELP,
         parser.Action.THANK,
         parser.Action.NULL,
+        parser.Action.INTRODUCE,
 
         # read-only commands
         parser.Action.LIST_GENERIC,
@@ -167,6 +169,7 @@ class CouncilBot(aioxmpp.service.Service):
             parser.Action.LIST_GENERIC: self._action_list_generic,
 
             parser.Action.THANK: self._action_thank,
+            parser.Action.INTRODUCE: self._action_introduce,
         }
         assert (
             set(self._action_map.keys()) == set(parser.Action),
@@ -772,3 +775,20 @@ class CouncilBot(aioxmpp.service.Service):
 
     def _action_thank(self, *args, **kwargs) -> ActionResultType:
         return None, "you’re welcome!"
+
+    def _action_introduce(
+            self,
+            actor: aioxmpp.JID,
+            message_id: str,
+            remaining_words: typing.List[str],
+            params: typing.Mapping[str, typing.Any],
+            permission_level: ActorPermissionLevel) -> ActionResultType:
+
+        if permission_level == ActorPermissionLevel.COUNCIL:
+            return None, "I am your Secretary."
+        else:
+            return (
+                None,
+                "I am the Council’s Secretary. I am a bot which keeps track of"
+                " the polls and votes and everything. How can I help you?"
+            )

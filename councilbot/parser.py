@@ -13,6 +13,7 @@ class Action(enum.Enum):
     LIST_VOTES = "list_votes"
     LIST_GENERIC = "list_generic"
     THANK = "thank"
+    INTRODUCE = "introduce"
     NULL = None
 
 
@@ -170,6 +171,17 @@ PARSE_TREE = TextNode(
         TextNode(
             re.compile("!list", re.I),
             action=Action.LIST_GENERIC,
+        ),
+        TextNode(
+            re.compile(r"who", re.I),
+            skip=["are", "is"],
+            children=[
+                TextNode(
+                    re.compile(r"you", re.I),
+                    skip=["are"],
+                    action=Action.INTRODUCE,
+                )
+            ]
         ),
         TextNode(
             re.compile(r"show|list", re.I),
