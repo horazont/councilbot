@@ -259,8 +259,16 @@ class CouncilBot(aioxmpp.service.Service):
         message.body[self.LANGUAGE] = text
         self._room.send_message(message)
 
-    async def _execute_action(self, impl, member, message_id, remaining_words,
-                              params, replace_id):
+    async def _execute_action(
+            self,
+            impl: typing.Callable,
+            member: aioxmpp.muc.Occupant,
+            message_id: typing.Optional[str],
+            remaining_words: typing.List[str],
+            params: typing.Mapping[str, typing.Any],
+            replace_id: typing.Optional[str],
+            permission_level: ActorPermissionLevel):
+
         try:
             if asyncio.iscoroutinefunction(impl):
                 tid, reply = await impl(
@@ -268,6 +276,7 @@ class CouncilBot(aioxmpp.service.Service):
                     message_id,
                     remaining_words,
                     params,
+                    permission_level,
                 )
             else:
                 tid, reply = impl(
@@ -275,6 +284,7 @@ class CouncilBot(aioxmpp.service.Service):
                     message_id,
                     remaining_words,
                     params,
+                    permission_level,
                 )
 
             if reply is not None:
@@ -388,6 +398,7 @@ class CouncilBot(aioxmpp.service.Service):
                 remaining_words,
                 params,
                 replace_id,
+                permission_level,
             )
         ))
 
@@ -472,7 +483,8 @@ class CouncilBot(aioxmpp.service.Service):
             actor: aioxmpp.JID,
             message_id: str,
             remaining_words: typing.List[str],
-            params: typing.Mapping[str, typing.Any]) -> ActionResultType:
+            params: typing.Mapping[str, typing.Any],
+            permission_level: ActorPermissionLevel) -> ActionResultType:
         text = " ".join(remaining_words).rstrip("? \t\n")
 
         match = TAG_RE.search(text)
@@ -538,7 +550,8 @@ class CouncilBot(aioxmpp.service.Service):
             actor: aioxmpp.JID,
             message_id: str,
             remaining_words: typing.List[str],
-            params: typing.Mapping[str, typing.Any]) -> ActionResultType:
+            params: typing.Mapping[str, typing.Any],
+            permission_level: ActorPermissionLevel) -> ActionResultType:
         try:
             poll_id = self._state.find_poll(" ".join(remaining_words))
         except KeyError:
@@ -574,7 +587,8 @@ class CouncilBot(aioxmpp.service.Service):
             actor: aioxmpp.JID,
             message_id: str,
             remaining_words: typing.List[str],
-            params: typing.Mapping[str, typing.Any]) -> ActionResultType:
+            params: typing.Mapping[str, typing.Any],
+            permission_level: ActorPermissionLevel) -> ActionResultType:
         pass
 
     def _action_cast_vote(
@@ -582,7 +596,8 @@ class CouncilBot(aioxmpp.service.Service):
             actor: aioxmpp.JID,
             message_id: str,
             remaining_words: typing.List[str],
-            params: typing.Mapping[str, typing.Any]) -> ActionResultType:
+            params: typing.Mapping[str, typing.Any],
+            permission_level: ActorPermissionLevel) -> ActionResultType:
         value = councilbot.state.VoteValue(params["vote"])
 
         text = " ".join(remaining_words)
@@ -642,7 +657,8 @@ class CouncilBot(aioxmpp.service.Service):
             actor: aioxmpp.JID,
             message_id: str,
             remaining_words: typing.List[str],
-            params: typing.Mapping[str, typing.Any]) -> ActionResultType:
+            params: typing.Mapping[str, typing.Any],
+            permission_level: ActorPermissionLevel) -> ActionResultType:
         try:
             poll_id = self._state.find_poll(" ".join(remaining_words))
         except KeyError:
@@ -670,7 +686,8 @@ class CouncilBot(aioxmpp.service.Service):
             actor: aioxmpp.JID,
             message_id: str,
             remaining_words: typing.List[str],
-            params: typing.Mapping[str, typing.Any]) -> ActionResultType:
+            params: typing.Mapping[str, typing.Any],
+            permission_level: ActorPermissionLevel) -> ActionResultType:
         if remaining_words:
             return (
                 None,
@@ -719,7 +736,8 @@ class CouncilBot(aioxmpp.service.Service):
             actor: aioxmpp.JID,
             message_id: str,
             remaining_words: typing.List[str],
-            params: typing.Mapping[str, typing.Any]) -> ActionResultType:
+            params: typing.Mapping[str, typing.Any],
+            permission_level: ActorPermissionLevel) -> ActionResultType:
         if remaining_words:
             return (
                 None,
@@ -743,7 +761,8 @@ class CouncilBot(aioxmpp.service.Service):
             actor: aioxmpp.JID,
             message_id: str,
             remaining_words: typing.List[str],
-            params: typing.Mapping[str, typing.Any]) -> ActionResultType:
+            params: typing.Mapping[str, typing.Any],
+            permission_level: ActorPermissionLevel) -> ActionResultType:
         return self._action_list_polls(
             actor,
             message_id,
