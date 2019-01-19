@@ -2,6 +2,7 @@ import asyncio
 import enum
 import functools
 import re
+import typing
 
 from datetime import datetime, timedelta
 
@@ -18,6 +19,9 @@ from . import parser, extractor
 
 
 TAG_RE = re.compile(r"\[([^\]]+)\]")
+
+
+ActionResultType = typing.Tuple[typing.Optional[str], typing.Optional[str]]
 
 
 class ActorPermissionLevel(enum.Enum):
@@ -454,13 +458,21 @@ class CouncilBot(aioxmpp.service.Service):
             "\n".join(message),
         )
 
-    def _action_nothing(self, *args, **kwargs):
+    def _action_nothing(self, *args, **kwargs) -> ActionResultType:
         return None, "as if it never happened"
 
-    def _action_help(self, *args, **kwargs):
-        return None, "https://github.com/horazont/councilbot/blob/master/docs/manual.rst"
+    def _action_help(self, *args, **kwargs) -> ActionResultType:
+        return (
+            None,
+            "https://github.com/horazont/councilbot/blob/master/docs/manual.rst"
+        )
 
-    async def _action_create_poll(self, actor, message_id, remaining_words, params):
+    async def _action_create_poll(
+            self,
+            actor: aioxmpp.JID,
+            message_id: str,
+            remaining_words: typing.List[str],
+            params: typing.Mapping[str, typing.Any]) -> ActionResultType:
         text = " ".join(remaining_words).rstrip("? \t\n")
 
         match = TAG_RE.search(text)
@@ -521,7 +533,12 @@ class CouncilBot(aioxmpp.service.Service):
 
         return tid, "\n".join(result)
 
-    def _action_list_votes(self, actor, message_id, remaining_words, params):
+    def _action_list_votes(
+            self,
+            actor: aioxmpp.JID,
+            message_id: str,
+            remaining_words: typing.List[str],
+            params: typing.Mapping[str, typing.Any]) -> ActionResultType:
         try:
             poll_id = self._state.find_poll(" ".join(remaining_words))
         except KeyError:
@@ -552,10 +569,20 @@ class CouncilBot(aioxmpp.service.Service):
 
         return None, "\n".join(result)
 
-    def _action_conclude_poll(self, actor, message_id, remaining_words, params):
+    def _action_conclude_poll(
+            self,
+            actor: aioxmpp.JID,
+            message_id: str,
+            remaining_words: typing.List[str],
+            params: typing.Mapping[str, typing.Any]) -> ActionResultType:
         pass
 
-    def _action_cast_vote(self, actor, message_id, remaining_words, params):
+    def _action_cast_vote(
+            self,
+            actor: aioxmpp.JID,
+            message_id: str,
+            remaining_words: typing.List[str],
+            params: typing.Mapping[str, typing.Any]) -> ActionResultType:
         value = councilbot.state.VoteValue(params["vote"])
 
         text = " ".join(remaining_words)
@@ -610,7 +637,12 @@ class CouncilBot(aioxmpp.service.Service):
             remark or "(no comment)",
         )
 
-    def _action_delete_poll(self, actor, message_id, remaining_words, params):
+    def _action_delete_poll(
+            self,
+            actor: aioxmpp.JID,
+            message_id: str,
+            remaining_words: typing.List[str],
+            params: typing.Mapping[str, typing.Any]) -> ActionResultType:
         try:
             poll_id = self._state.find_poll(" ".join(remaining_words))
         except KeyError:
@@ -633,7 +665,12 @@ class CouncilBot(aioxmpp.service.Service):
 
         return tid, "deleted poll on {}".format(poll.subject)
 
-    def _action_list_polls(self, actor, message_id, remaining_words, params):
+    def _action_list_polls(
+            self,
+            actor: aioxmpp.JID,
+            message_id: str,
+            remaining_words: typing.List[str],
+            params: typing.Mapping[str, typing.Any]) -> ActionResultType:
         if remaining_words:
             return (
                 None,
@@ -651,8 +688,8 @@ class CouncilBot(aioxmpp.service.Service):
                  for poll_id in self._state.active_polls]
 
         for poll in sorted(polls,
-                                  key=lambda x: x.end_time,
-                                  reverse=True):
+                           key=lambda x: x.end_time,
+                           reverse=True):
             result.append(
                 "{} (due {}, on {:%Y-%m-%d})".format(
                     poll.subject,
@@ -677,7 +714,12 @@ class CouncilBot(aioxmpp.service.Service):
 
         return None, "\n".join(result)
 
-    def _action_autoconclude(self, actor, message_id, remaining_words, params):
+    def _action_autoconclude(
+            self,
+            actor: aioxmpp.JID,
+            message_id: str,
+            remaining_words: typing.List[str],
+            params: typing.Mapping[str, typing.Any]) -> ActionResultType:
         if remaining_words:
             return (
                 None,
@@ -696,7 +738,12 @@ class CouncilBot(aioxmpp.service.Service):
 
         return None, None
 
-    def _action_list_generic(self, actor, message_id, remaining_words, params):
+    def _action_list_generic(
+            self,
+            actor: aioxmpp.JID,
+            message_id: str,
+            remaining_words: typing.List[str],
+            params: typing.Mapping[str, typing.Any]) -> ActionResultType:
         return self._action_list_polls(
             actor,
             message_id,
@@ -704,5 +751,5 @@ class CouncilBot(aioxmpp.service.Service):
             {"selector": parser.PollSelector.OPEN},
         )
 
-    def _action_thank(self, actor, message_id, remaining_words, params):
+    def _action_thank(self, *args, **kwargs) -> ActionResultType:
         return None, "you’re welcome!"
