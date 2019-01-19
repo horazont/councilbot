@@ -205,6 +205,8 @@ class Poll:
 
     .. autoattribute:: flags
 
+    .. attribute:: made_current_at
+
     .. attribute:: urls
 
     .. attribute:: tag
@@ -234,6 +236,7 @@ class Poll:
         self.tag = None
         self.urls = []
         self.description = None
+        self.made_current_at = None
 
     def __copy__(self):
         result = type(self)(self._id,
@@ -247,6 +250,7 @@ class Poll:
         result.tag = self.tag
         result.urls[:] = self.urls
         result.description = self.description
+        result.made_current_at = self.made_current_at
         return result
 
     @property
@@ -401,6 +405,9 @@ class Poll:
         if self.description is not None:
             data["description"] = self.description
 
+        if self.made_current_at is not None:
+            data["made_current_at"] = self.made_current_at
+
         toml.dump(data, fout)
 
     @classmethod
@@ -427,6 +434,7 @@ class Poll:
         result.tag = data.get("tag")
         result.urls[:] = data.get("urls", [])
         result.description = data.get("description")
+        result.made_current_at = data.get("made_current_at")
 
         return result
 
