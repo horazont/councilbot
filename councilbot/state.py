@@ -750,7 +750,8 @@ class State:
                     topic,
                     lifetime=timedelta(days=14),
                     tag=None,
-                    urls=[]) -> TransactionID:
+                    urls=[],
+                    description=None) -> TransactionID:
         # data for reversal: dirname (to mark deleted)
         tid = self.make_transaction_id()
 
@@ -771,6 +772,7 @@ class State:
         )
         poll.urls[:] = urls
         poll.tag = tag
+        poll.description = description
         path = self._activedir / self._poll_filename(id_)
 
         try:

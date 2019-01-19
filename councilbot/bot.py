@@ -412,14 +412,17 @@ class CouncilBot(aioxmpp.service.Service):
             text,
         )
 
-        if (metadata is not None and
-                metadata.title and
-                metadata.matched_url == text.strip()):
-            text = metadata.title
+        description = None
 
-        if (metadata is not None and
-                metadata.tag):
-            tag = metadata.tag
+        if metadata is not None:
+            if (metadata.title and
+                metadata.matched_url == text.strip()):
+                text = metadata.title
+
+            if metadata.tag:
+                tag = metadata.tag
+
+            description = metadata.description or description
 
         try:
             tid, poll_id = self._state.create_poll(
@@ -427,7 +430,8 @@ class CouncilBot(aioxmpp.service.Service):
                 message_id,
                 text,
                 tag=tag,
-                urls=metadata.urls if metadata is not None else []
+                urls=metadata.urls if metadata is not None else [],
+                description=description,
             )
         except FileExistsError:
             return (
@@ -448,6 +452,10 @@ class CouncilBot(aioxmpp.service.Service):
 
         for url in poll.urls:
             result.append("URL: {}".format(url))
+
+        if poll.description:
+            result.append("")
+            result.append(poll.description)
 
         return tid, "\n".join(result)
 
