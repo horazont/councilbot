@@ -143,7 +143,7 @@ class CouncilBot(aioxmpp.service.Service):
         aioxmpp.PresenceClient,
     ]
 
-    LANGUAGE = aioxmpp.structs.LanguageTag.fromstr("en")
+    LANGUAGE = None # aioxmpp.structs.LanguageTag.fromstr("en")
 
     on_fatal_error = aioxmpp.callbacks.Signal()
 
