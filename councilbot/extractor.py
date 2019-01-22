@@ -1,3 +1,4 @@
+import bs4
 import collections
 import re
 
@@ -24,6 +25,11 @@ XEPS_PR_FILES_URL_TEMPLATE = \
 MAX_READ_SIZE = 10*1024*1024  # 10 MiB -- more than enough for all current XEPs
 READ_CHUNK_SIZE = 4096
 XEP_FILE_RE = re.compile(r"(xep-[0-9]{4}).xml")
+
+STANDARDS_URL_RE = re.compile(
+    r"https://mail.jabber.org/pipermail/standards/.+\.html",
+    re.I,
+)
 
 BAD_SHORT_NAME_RE = re.compile(
     "^not[\W_]yet[\W_]assigned|None|N/A$",
@@ -134,9 +140,35 @@ async def _extract_xeps_pr_metadata(match):
     )
 
 
+async def _extract_standards_metadata(match):
+    STANDARDS_PREFIX = "[Standards] "
+
+    matched_url = match.group(0)
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(matched_url) as response:
+            data = await response.content.read(MAX_READ_SIZE)
+
+    soup = bs4.BeautifulSoup(data, "lxml")
+    del data
+
+    title = soup.find("h1").text
+    if title.startswith(STANDARDS_PREFIX):
+        title = title[len(STANDARDS_PREFIX):]
+
+    return URLMetadata(
+        matched_url=matched_url,
+        title=title.strip() or None,
+        description=None,
+        tag=None,
+        urls=[matched_url]
+    )
+
+
 _IMPLEMENTATIONS = [
     (PROTOXEP_URL_RE, _extract_protoxep_metadata),
     (XEPS_PR_URL_RE, _extract_xeps_pr_metadata),
+    (STANDARDS_URL_RE, _extract_standards_metadata),
 ]
 
 
